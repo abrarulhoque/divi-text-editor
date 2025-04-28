@@ -1,0 +1,230 @@
+/**
+ * Divi Text Editor - Admin CSS
+ */
+
+/* Tab styling */
+.nav-tab-wrapper {
+  margin-bottom: 20px;
+}
+
+.tab-content {
+  display: none;
+  background: #fff;
+  padding: 20px;
+  border: 1px solid #ccc;
+  border-top: none;
+  margin-top: -1px;
+}
+
+.tab-content.active {
+  display: block;
+}
+
+/* Help section styling */
+.divi-text-editor-help {
+  margin-top: 20px;
+  background: #fff;
+  padding: 20px;
+  border-left: 4px solid #2271b1;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.04);
+}
+
+.divi-text-editor-help h2 {
+  margin-top: 0;
+}
+
+.divi-text-editor-help code {
+  background: #f0f0f1;
+  padding: 3px 5px;
+  border-radius: 3px;
+}
+
+/* Form styling */
+.form-table th {
+  width: 250px;
+}
+
+.form-table textarea {
+  min-height: 100px;
+}
+
+/* Variable styling */
+.form-table th label {
+  font-family: monospace;
+  padding: 5px 10px;
+  background: #f0f0f1;
+  border-radius: 3px;
+  display: inline-block;
+}
+
+/* Import/Export styling */
+#import-export h2 {
+  margin-top: 30px;
+}
+
+#import-export h2:first-child {
+  margin-top: 0;
+}
+
+#import-export form {
+  margin-bottom: 30px;
+  padding-bottom: 30px;
+  border-bottom: 1px solid #eee;
+}
+
+#import-export form:last-child {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+/* Text Mapping styling */
+.text-mapping-tool {
+  background: #fff;
+  border: 1px solid #e5e5e5;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.04);
+  padding: 15px;
+  margin-bottom: 20px;
+}
+
+.text-mapping-input,
+.text-mapping-variable,
+.text-mapping-actions {
+  margin-bottom: 15px;
+}
+
+.text-mapping-input label,
+.text-mapping-variable label {
+  display: block;
+  margin-bottom: 5px;
+  font-weight: 600;
+}
+
+.text-mapping-input textarea {
+  width: 100%;
+  min-height: 150px;
+}
+
+.text-mapping-variable select {
+  min-width: 250px;
+}
+
+.text-mapping-actions {
+  display: flex;
+  align-items: center;
+}
+
+.text-mapping-actions .spinner {
+  float: none;
+  margin-left: 10px;
+}
+
+.mapping-result {
+  display: none;
+  padding: 10px;
+  margin-left: 15px;
+  border-radius: 3px;
+}
+
+.mapping-result.success {
+  background-color: #f0f9e6;
+  color: #46b450;
+  border: 1px solid #7ad03a;
+}
+
+.mapping-result.error {
+  background-color: #fbeaea;
+  color: #dc3232;
+  border: 1px solid #dc3232;
+}
+
+.text-mapping-help {
+  margin-top: 20px;
+}
+
+.text-mapping-help ol {
+  margin-left: 20px;
+}
+
+.text-mapping-help li {
+  margin-bottom: 10px;
+}
+
+/* Multi-Cell Paste functionality */
+.multi-paste-highlight {
+  background-color: #e8f4fd !important; /* Slightly darker blue */
+  border-color: #2271b1 !important; /* WordPress blue */
+  box-shadow: 0 0 2px 1px rgba(34, 113, 177, 0.3) !important; /* Add subtle glow */
+  transition: all 0.3s ease;
+}
+
+.multi-paste-message {
+  display: none;
+  padding: 10px 15px;
+  margin: 10px 0 15px 0;
+  border-left: 4px solid;
+  border-radius: 2px;
+  font-weight: 500;
+}
+
+.multi-paste-message.success {
+  background-color: #f0f9e6;
+  color: #46b450;
+  border-color: #7ad03a;
+}
+
+.multi-paste-message.warning {
+  background-color: #fff8e5;
+  color: #ffb900;
+  border-color: #ffb900;
+}
+
+@media screen and (max-width: 782px) {
+  .form-table th {
+    width: auto;
+  }
+}
+
+/* Excel-like selection styling */
+.textarea-selected {
+  background-color: #f0f7ff !important;
+  border-color: #2271b1 !important;
+  box-shadow: 0 0 0 1px #2271b1 !important;
+  outline: 2px solid rgba(34, 113, 177, 0.3) !important;
+}
+
+/* Remove default textarea outline when focused within selection */
+.textarea-selected:focus {
+  box-shadow: 0 0 0 1px #2271b1 !important;
+  outline: 2px solid rgba(34, 113, 177, 0.5) !important;
+}
+
+/* Prevent text selection during drag operations */
+.textarea-selected::selection {
+  background-color: transparent;
+}
+
+/* Drag handle styling (similar to Excel's cell selection handle) */
+.textarea-drag-handle {
+  position: absolute;
+  bottom: 4px;
+  right: 4px;
+  width: 10px;
+  height: 10px;
+  background-color: #2271b1;
+  border-radius: 1px;
+  cursor: crosshair;
+  z-index: 100;
+  opacity: 0.8;
+  transition: transform 0.1s ease, opacity 0.2s ease;
+}
+
+.textarea-drag-handle:hover {
+  opacity: 1;
+  transform: scale(1.2);
+}
+
+/* Restore normal cursor for textareas */
+#settings .form-table textarea {
+  cursor: text;
+}
