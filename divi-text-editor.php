@@ -358,16 +358,23 @@ class DiviTextEditor {
                                 
                                 switch ($module_type) {
                                     case 'text':
+                                    case 'text_content':
                                         $module_type_label = __('Text Module', 'divi-text-editor');
                                         break;
                                     case 'blurb_title':
                                         $module_type_label = __('Blurb Title', 'divi-text-editor');
+                                        break;
+                                    case 'blurb_content':
+                                        $module_type_label = __('Blurb Content', 'divi-text-editor');
                                         break;
                                     case 'button_text':
                                         $module_type_label = __('Button Text', 'divi-text-editor');
                                         break;
                                     case 'header_title':
                                         $module_type_label = __('Header Title', 'divi-text-editor');
+                                        break;
+                                    case 'header_subhead':
+                                        $module_type_label = __('Header Subheading', 'divi-text-editor');
                                         break;
                                     case 'header_content':
                                         $module_type_label = __('Header Content', 'divi-text-editor');
@@ -378,14 +385,38 @@ class DiviTextEditor {
                                     case 'cta_content':
                                         $module_type_label = __('CTA Content', 'divi-text-editor');
                                         break;
+                                    case 'cta_button':
+                                        $module_type_label = __('CTA Button', 'divi-text-editor');
+                                        break;
                                     case 'testimonial_author':
                                         $module_type_label = __('Testimonial Author', 'divi-text-editor');
                                         break;
                                     case 'testimonial_content':
                                         $module_type_label = __('Testimonial Content', 'divi-text-editor');
                                         break;
+                                    case 'typing_text':
+                                        $module_type_label = __('Typing Text (Divi Pixel)', 'divi-text-editor');
+                                        break;
+                                    case 'expanding_title':
+                                        $module_type_label = __('Expanding CTA Title (Divi Pixel)', 'divi-text-editor');
+                                        break;
+                                    case 'expanding_description':
+                                        $module_type_label = __('Expanding CTA Description (Divi Pixel)', 'divi-text-editor');
+                                        break;
+                                    case 'expanding_button':
+                                        $module_type_label = __('Expanding CTA Button (Divi Pixel)', 'divi-text-editor');
+                                        break;
+                                    case 'hover_title':
+                                        $module_type_label = __('Hover Box Title (Divi Pixel)', 'divi-text-editor');
+                                        break;
+                                    case 'hover_content':
+                                        $module_type_label = __('Hover Box Content (Divi Pixel)', 'divi-text-editor');
+                                        break;
+                                    case 'hover_button':
+                                        $module_type_label = __('Hover Box Button (Divi Pixel)', 'divi-text-editor');
+                                        break;
                                     default:
-                                        $module_type_label = __('Unknown', 'divi-text-editor');
+                                        $module_type_label = ucwords(str_replace('_', ' ', $module_type));
                                 }
                                 
                                 // Combine location and type for the label

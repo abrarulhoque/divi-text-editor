@@ -11,7 +11,7 @@ if (!defined('WPINC')) {
 
 /**
  * Class DiviTextEditorScanner
- * Handles scanning and extracting text from Divi modules
+ * Handles scanning and extracting text from Divi modules using hierarchical approach
  */
 class DiviTextEditorScanner {
     
@@ -21,29 +21,29 @@ class DiviTextEditorScanner {
     private $scanned_items = [];
     
     /**
-     * Divi shortcode patterns for different module types
+     * Position counter for maintaining order
      */
-    private $shortcode_patterns = [
-        // Text modules
-        'text' => '/\[et_pb_text[^\]]*\](.*?)\[\/et_pb_text\]/is',
-        
-        // Blurb modules (title attribute)
-        'blurb_title' => '/\[et_pb_blurb[^\]]*title="([^"]*)"[^\]]*\]/i',
-        
-        // Button modules (button text attribute)
-        'button_text' => '/\[et_pb_button[^\]]*button_text="([^"]*)"[^\]]*\]/i',
-        
-        // Header modules
-        'header_title' => '/\[et_pb_fullwidth_header[^\]]*title="([^"]*)"[^\]]*\]/i',
-        'header_content' => '/\[et_pb_fullwidth_header[^\]]*content="([^"]*)"[^\]]*\]/i',
-        
-        // Call to action modules
-        'cta_title' => '/\[et_pb_cta[^\]]*title="([^"]*)"[^\]]*\]/i',
-        'cta_content' => '/\[et_pb_cta[^\]]*\](.*?)\[\/et_pb_cta\]/is',
-        
-        // Testimonial modules
-        'testimonial_author' => '/\[et_pb_testimonial[^\]]*author="([^"]*)"[^\]]*\]/i',
-        'testimonial_content' => '/\[et_pb_testimonial[^\]]*\](.*?)\[\/et_pb_testimonial\]/is',
+    private $position_counter = 0;
+    
+    /**
+     * Module types that contain editable text
+     */
+    private $text_modules = [
+        'et_pb_text',
+        'et_pb_blurb',
+        'et_pb_button',
+        'et_pb_cta',
+        'et_pb_fullwidth_header',
+        'et_pb_testimonial',
+        'et_pb_toggle',
+        'et_pb_tab',
+        'et_pb_pricing_table',
+        'et_pb_number_counter',
+        'et_pb_circle_counter',
+        'et_pb_countdown_timer',
+        'dipi_typing_text',
+        'dipi_expanding_cta',
+        'dipi_hover_box'
     ];
     
     /**
@@ -55,6 +55,9 @@ class DiviTextEditorScanner {
         
         // Skip Divi dynamic content tags
         '/%[\w_]+%/',
+        
+        // Skip dynamic content markers
+        '/@ET-DC@/',
     ];
     
     /**
@@ -71,86 +74,273 @@ class DiviTextEditorScanner {
      * @return array Scanned text items
      */
     public function scan_all_content() {
-        // Get all post types that might use Divi
-        $post_types = [
-            'post',
-            'page',
-            'et_pb_layout',
-            'et_body_layout',
-            'et_header_layout', 
-            'et_footer_layout'
+        // Only scan pages by default, exclude posts (articles)
+        $post_types = ['page'];
+        
+        // Allow filtering of post types
+        $post_types = apply_filters('divi_text_editor_scan_post_types', $post_types);
+        
+        // Query posts with Divi Builder enabled
+        $args = [
+            'post_type' => $post_types,
+            'post_status' => 'publish',
+            'posts_per_page' => -1,
+            'meta_query' => [
+                [
+                    'key' => '_et_pb_use_builder',
+                    'value' => 'on',
+                    'compare' => '='
+                ]
+            ]
         ];
         
-        // Query posts
-        $posts = get_posts([
-            'post_type' => $post_types,
-            'numberposts' => -1,
-            'post_status' => 'publish'
-        ]);
+        $query = new WP_Query($args);
         
         // Reset scanned items
         $this->scanned_items = [];
+        $this->position_counter = 0;
         
         // Process each post
-        foreach ($posts as $post) {
-            $this->scan_post($post);
+        if ($query->have_posts()) {
+            while ($query->have_posts()) {
+                $query->the_post();
+                $post_id = get_the_ID();
+                
+                // Skip blog posts (articles)
+                if (get_post_type($post_id) === 'post') {
+                    continue;
+                }
+                
+                $this->scan_post_hierarchical($post_id);
+            }
         }
         
-        // Return the found items
-        return $this->scanned_items;
+        wp_reset_postdata();
+        
+        // Sort by position to ensure proper order
+        usort($this->scanned_items, function($a, $b) {
+            return $a['position'] - $b['position'];
+        });
+        
+        // Convert to keyed array for compatibility
+        $keyed_items = [];
+        foreach ($this->scanned_items as $item) {
+            $keyed_items[$item['key']] = $item;
+        }
+        
+        return $keyed_items;
     }
     
     /**
-     * Scan a single post for Divi content
+     * Scan a single post using hierarchical approach
      * 
-     * @param WP_Post $post Post object to scan
+     * @param int $post_id Post ID to scan
      */
-    private function scan_post($post) {
-        // Check if post has content
-        if (empty($post->post_content)) {
+    private function scan_post_hierarchical($post_id) {
+        $post = get_post($post_id);
+        if (!$post || empty($post->post_content)) {
             return;
         }
         
-        // Check if post has Divi content (contains at least one Divi shortcode)
+        // Check if post has Divi content
         if (strpos($post->post_content, '[et_pb_') === false) {
             return;
         }
         
-        // Scan each module type
-        foreach ($this->shortcode_patterns as $type => $pattern) {
-            if (preg_match_all($pattern, $post->post_content, $matches, PREG_SET_ORDER)) {
-                foreach ($matches as $match) {
-                    // The content is in capture group 1
-                    $text = $match[1];
+        // Parse the content hierarchically
+        $this->parse_content_hierarchical($post->post_content, $post_id, $post->post_type, $post->post_title);
+    }
+    
+    /**
+     * Parse content hierarchically (sections -> rows -> columns -> modules)
+     */
+    private function parse_content_hierarchical($content, $post_id, $post_type, $post_title) {
+        // Parse sections
+        $section_pattern = '/\[et_pb_section([^\]]*)\](.*?)\[\/et_pb_section\]/s';
+        preg_replace_callback($section_pattern, function($matches) use ($post_id, $post_type, $post_title) {
+            $section_content = $matches[2];
+            
+            // Parse rows within section
+            $row_pattern = '/\[et_pb_row([^\]]*)\](.*?)\[\/et_pb_row\]/s';
+            preg_replace_callback($row_pattern, function($matches) use ($post_id, $post_type, $post_title) {
+                $row_content = $matches[2];
+                
+                // Parse columns within row
+                $column_pattern = '/\[et_pb_column([^\]]*)\](.*?)\[\/et_pb_column\]/s';
+                preg_replace_callback($column_pattern, function($matches) use ($post_id, $post_type, $post_title) {
+                    $column_content = $matches[2];
                     
-                    // Skip if the text is empty
-                    if (empty(trim($text))) {
-                        continue;
-                    }
+                    // Parse modules within column
+                    $this->parse_modules($column_content, $post_id, $post_type, $post_title);
                     
-                    // Skip if contains dynamic content
-                    if ($this->contains_dynamic_content($text)) {
-                        continue;
-                    }
-                    
-                    // Clean up HTML entities
-                    $text = html_entity_decode($text);
-                    
-                    // Generate a unique key for this text
-                    $key = $this->generate_key($text, $type, $post->ID);
-                    
-                    // Add to scanned items
-                    $this->scanned_items[$key] = [
-                        'text' => $text,
-                        'type' => $type,
-                        'post_id' => $post->ID,
-                        'post_title' => $post->post_title,
-                        'post_type' => $post->post_type,
-                        'key' => $key
-                    ];
-                }
+                    return $matches[0];
+                }, $row_content);
+                
+                return $matches[0];
+            }, $section_content);
+            
+            return $matches[0];
+        }, $content);
+    }
+    
+    /**
+     * Parse modules and extract text
+     */
+    private function parse_modules($content, $post_id, $post_type, $post_title) {
+        // Pattern for modules with content
+        $module_pattern = '/\[([a-z_]+)([^\]]*?)\](?:(.*?)\[\/\1\])?/s';
+        
+        preg_replace_callback($module_pattern, function($matches) use ($post_id, $post_type, $post_title) {
+            $module_type = $matches[1];
+            $attributes_string = $matches[2];
+            $inner_content = isset($matches[3]) ? $matches[3] : '';
+            
+            // Only process text modules
+            if (in_array($module_type, $this->text_modules)) {
+                $this->extract_module_text($module_type, $attributes_string, $inner_content, $post_id, $post_type, $post_title);
             }
+            
+            return $matches[0];
+        }, $content);
+    }
+    
+    /**
+     * Extract text from a specific module
+     */
+    private function extract_module_text($module_type, $attributes_string, $content, $post_id, $post_type, $post_title) {
+        // Parse attributes
+        $attributes = $this->parse_attributes($attributes_string);
+        
+        // Extract text based on module type
+        switch ($module_type) {
+            case 'et_pb_text':
+                if (!empty($content) && !$this->contains_dynamic_content($content)) {
+                    $this->add_text_item($content, 'text_content', $module_type, $post_id, $post_type, $post_title);
+                }
+                break;
+                
+            case 'et_pb_blurb':
+                if (!empty($attributes['title']) && !$this->contains_dynamic_content($attributes['title'])) {
+                    $this->add_text_item($attributes['title'], 'blurb_title', $module_type, $post_id, $post_type, $post_title);
+                }
+                if (!empty($content) && !$this->contains_dynamic_content($content)) {
+                    $this->add_text_item($content, 'blurb_content', $module_type, $post_id, $post_type, $post_title);
+                }
+                break;
+                
+            case 'et_pb_button':
+                if (!empty($attributes['button_text']) && !$this->contains_dynamic_content($attributes['button_text'])) {
+                    $this->add_text_item($attributes['button_text'], 'button_text', $module_type, $post_id, $post_type, $post_title);
+                }
+                break;
+                
+            case 'et_pb_fullwidth_header':
+                if (!empty($attributes['title']) && !$this->contains_dynamic_content($attributes['title'])) {
+                    $this->add_text_item($attributes['title'], 'header_title', $module_type, $post_id, $post_type, $post_title);
+                }
+                if (!empty($attributes['subhead']) && !$this->contains_dynamic_content($attributes['subhead'])) {
+                    $this->add_text_item($attributes['subhead'], 'header_subhead', $module_type, $post_id, $post_type, $post_title);
+                }
+                if (!empty($content) && !$this->contains_dynamic_content($content)) {
+                    $this->add_text_item($content, 'header_content', $module_type, $post_id, $post_type, $post_title);
+                }
+                break;
+                
+            case 'et_pb_cta':
+                if (!empty($attributes['title']) && !$this->contains_dynamic_content($attributes['title'])) {
+                    $this->add_text_item($attributes['title'], 'cta_title', $module_type, $post_id, $post_type, $post_title);
+                }
+                if (!empty($content) && !$this->contains_dynamic_content($content)) {
+                    $this->add_text_item($content, 'cta_content', $module_type, $post_id, $post_type, $post_title);
+                }
+                if (!empty($attributes['button_text']) && !$this->contains_dynamic_content($attributes['button_text'])) {
+                    $this->add_text_item($attributes['button_text'], 'cta_button', $module_type, $post_id, $post_type, $post_title);
+                }
+                break;
+                
+            case 'dipi_typing_text':
+                if (!empty($attributes['typing_text']) && !$this->contains_dynamic_content($attributes['typing_text'])) {
+                    $this->add_text_item($attributes['typing_text'], 'typing_text', $module_type, $post_id, $post_type, $post_title);
+                }
+                break;
+                
+            case 'dipi_expanding_cta':
+                if (!empty($attributes['content_title']) && !$this->contains_dynamic_content($attributes['content_title'])) {
+                    $this->add_text_item($attributes['content_title'], 'expanding_title', $module_type, $post_id, $post_type, $post_title);
+                }
+                if (!empty($attributes['content_description']) && !$this->contains_dynamic_content($attributes['content_description'])) {
+                    $this->add_text_item($attributes['content_description'], 'expanding_description', $module_type, $post_id, $post_type, $post_title);
+                }
+                if (!empty($attributes['content_button_text']) && !$this->contains_dynamic_content($attributes['content_button_text'])) {
+                    $this->add_text_item($attributes['content_button_text'], 'expanding_button', $module_type, $post_id, $post_type, $post_title);
+                }
+                break;
+                
+            case 'dipi_hover_box':
+                if (!empty($attributes['content_hover_title']) && !$this->contains_dynamic_content($attributes['content_hover_title'])) {
+                    $this->add_text_item($attributes['content_hover_title'], 'hover_title', $module_type, $post_id, $post_type, $post_title);
+                }
+                if (!empty($attributes['content_hover_content']) && !$this->contains_dynamic_content($attributes['content_hover_content'])) {
+                    $this->add_text_item($attributes['content_hover_content'], 'hover_content', $module_type, $post_id, $post_type, $post_title);
+                }
+                if (!empty($attributes['content_hover_button_text']) && !$this->contains_dynamic_content($attributes['content_hover_button_text'])) {
+                    $this->add_text_item($attributes['content_hover_button_text'], 'hover_button', $module_type, $post_id, $post_type, $post_title);
+                }
+                break;
+                
+            case 'et_pb_testimonial':
+                if (!empty($attributes['author']) && !$this->contains_dynamic_content($attributes['author'])) {
+                    $this->add_text_item($attributes['author'], 'testimonial_author', $module_type, $post_id, $post_type, $post_title);
+                }
+                if (!empty($content) && !$this->contains_dynamic_content($content)) {
+                    $this->add_text_item($content, 'testimonial_content', $module_type, $post_id, $post_type, $post_title);
+                }
+                break;
         }
+    }
+    
+    /**
+     * Parse shortcode attributes
+     */
+    private function parse_attributes($attributes_string) {
+        $attributes = [];
+        
+        // Match attribute="value" pattern
+        preg_match_all('/(\w+)="([^"]*)"/', $attributes_string, $matches, PREG_SET_ORDER);
+        
+        foreach ($matches as $match) {
+            $attributes[$match[1]] = html_entity_decode($match[2]);
+        }
+        
+        return $attributes;
+    }
+    
+    /**
+     * Add a text item to the collection
+     */
+    private function add_text_item($text, $field_type, $module_type, $post_id, $post_type, $post_title) {
+        // Skip if text is empty or just whitespace
+        $text = trim($text);
+        if (empty($text)) {
+            return;
+        }
+        
+        // Generate unique key
+        $key = $this->generate_key($text, $field_type, $post_id);
+        
+        // Store with position for proper ordering
+        $this->scanned_items[] = [
+            'position' => $this->position_counter++,
+            'key' => $key,
+            'text' => $text,
+            'type' => $field_type,
+            'module_type' => $module_type,
+            'post_id' => $post_id,
+            'post_type' => $post_type,
+            'post_title' => $post_title,
+            'display_text' => wp_strip_all_tags($text),
+            'has_html' => ($text !== wp_strip_all_tags($text))
+        ];
     }
     
     /**
@@ -192,14 +382,14 @@ class DiviTextEditorScanner {
      * Save all scanned items to the database
      */
     public function save_scanned_items() {
-        // Get existing items
-        $existing_items = get_option('divi_text_editor_scanned_items', []);
-        
-        // Merge new items with existing ones
-        $merged_items = array_merge($existing_items, $this->scanned_items);
+        // Convert array to keyed format for storage
+        $keyed_items = [];
+        foreach ($this->scanned_items as $item) {
+            $keyed_items[$item['key']] = $item;
+        }
         
         // Save to database
-        update_option('divi_text_editor_scanned_items', $merged_items);
+        update_option('divi_text_editor_scanned_items', $keyed_items);
         
         return count($this->scanned_items);
     }
@@ -210,7 +400,18 @@ class DiviTextEditorScanner {
      * @return array All scanned items
      */
     public function get_saved_items() {
-        return get_option('divi_text_editor_scanned_items', []);
+        $items = get_option('divi_text_editor_scanned_items', []);
+        
+        // Sort by position if available
+        if (!empty($items)) {
+            uasort($items, function($a, $b) {
+                $pos_a = isset($a['position']) ? $a['position'] : 999999;
+                $pos_b = isset($b['position']) ? $b['position'] : 999999;
+                return $pos_a - $pos_b;
+            });
+        }
+        
+        return $items;
     }
     
     /**
@@ -231,13 +432,8 @@ class DiviTextEditorScanner {
         // Get the item data
         $item = $items[$key];
         
-        // Get the original text with HTML tags
-        $original_text = isset($item['text']) ? $item['text'] : '';
-        
-        // Check if we received POST data with original HTML
-        if (isset($_POST['scanned_item_' . $key . '_original'])) {
-            $original_text = wp_kses_post($_POST['scanned_item_' . $key . '_original']);
-        }
+        // Get the original text
+        $original_text = $item['text'];
         
         // Get the post
         $post = get_post($item['post_id']);
@@ -248,71 +444,30 @@ class DiviTextEditorScanner {
         // Get post content
         $content = $post->post_content;
         
-        // Different handling depending on the module type
-        switch ($item['type']) {
-            case 'text':
-                // Text module - replace content
-                $pattern = '/(\[et_pb_text[^\]]*\])' . preg_quote($original_text, '/') . '(\[\/et_pb_text\])/is';
-                $replacement = '$1' . $new_text . '$2';
-                break;
-                
-            case 'blurb_title':
-                // Blurb module - replace title attribute
-                $pattern = '/(\[et_pb_blurb[^\]]*title=")' . preg_quote($original_text, '/') . '("[^\]]*\])/i';
-                $replacement = '$1' . $new_text . '$2';
-                break;
-                
-            case 'button_text':
-                // Button module - replace button_text attribute
-                $pattern = '/(\[et_pb_button[^\]]*button_text=")' . preg_quote($original_text, '/') . '("[^\]]*\])/i';
-                $replacement = '$1' . $new_text . '$2';
-                break;
-                
-            case 'header_title':
-                // Header module - replace title attribute
-                $pattern = '/(\[et_pb_fullwidth_header[^\]]*title=")' . preg_quote($original_text, '/') . '("[^\]]*\])/i';
-                $replacement = '$1' . $new_text . '$2';
-                break;
-                
-            case 'header_content':
-                // Header module - replace content attribute
-                $pattern = '/(\[et_pb_fullwidth_header[^\]]*content=")' . preg_quote($original_text, '/') . '("[^\]]*\])/i';
-                $replacement = '$1' . $new_text . '$2';
-                break;
-                
-            case 'cta_title':
-                // CTA module - replace title attribute
-                $pattern = '/(\[et_pb_cta[^\]]*title=")' . preg_quote($original_text, '/') . '("[^\]]*\])/i';
-                $replacement = '$1' . $new_text . '$2';
-                break;
-                
-            case 'cta_content':
-                // CTA module - replace content
-                $pattern = '/(\[et_pb_cta[^\]]*\])' . preg_quote($original_text, '/') . '(\[\/et_pb_cta\])/is';
-                $replacement = '$1' . $new_text . '$2';
-                break;
-                
-            case 'testimonial_author':
-                // Testimonial module - replace author attribute
-                $pattern = '/(\[et_pb_testimonial[^\]]*author=")' . preg_quote($original_text, '/') . '("[^\]]*\])/i';
-                $replacement = '$1' . $new_text . '$2';
-                break;
-                
-            case 'testimonial_content':
-                // Testimonial module - replace content
-                $pattern = '/(\[et_pb_testimonial[^\]]*\])' . preg_quote($original_text, '/') . '(\[\/et_pb_testimonial\])/is';
-                $replacement = '$1' . $new_text . '$2';
-                break;
-                
-            default:
-                return false;
+        // Escape special regex characters in the original text
+        $escaped_original = preg_quote($original_text, '/');
+        
+        // Different handling depending on the module type and field
+        $module_type = isset($item['module_type']) ? $item['module_type'] : '';
+        $field_type = $item['type'];
+        
+        // Build replacement pattern based on field type
+        if (strpos($field_type, '_content') !== false || $field_type === 'text_content') {
+            // Content between tags
+            $pattern = '/(\[' . preg_quote($module_type) . '[^\]]*\])' . $escaped_original . '(\[\/' . preg_quote($module_type) . '\])/s';
+            $replacement = '$1' . $new_text . '$2';
+        } else {
+            // Attribute value
+            $attr_name = str_replace(['_text', 'expanding_', 'hover_'], ['', 'content_', 'content_hover_'], $field_type);
+            $pattern = '/(\[' . preg_quote($module_type) . '[^\]]*' . $attr_name . '=")' . $escaped_original . '("[^\]]*\])/';
+            $replacement = '$1' . esc_attr($new_text) . '$2';
         }
         
         // Perform the replacement
-        $new_content = preg_replace($pattern, $replacement, $content);
+        $new_content = preg_replace($pattern, $replacement, $content, 1); // Replace only first occurrence
         
         // Update the post content if it changed
-        if ($new_content !== $content) {
+        if ($new_content !== $content && $new_content !== null) {
             // Update post
             wp_update_post([
                 'ID' => $post->ID,
@@ -342,4 +497,4 @@ class DiviTextEditorScanner {
     public function delete_all_items() {
         return delete_option('divi_text_editor_scanned_items');
     }
-} 
+}
