@@ -228,3 +228,122 @@
 #settings .form-table textarea {
   cursor: text;
 }
+
+/* Scanner styling */
+.scanner-actions {
+  display: flex;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.scanner-actions .spinner {
+  float: none;
+  margin-left: 10px;
+}
+
+.scan-result {
+  display: none;
+  padding: 10px;
+  margin-left: 15px;
+  border-radius: 3px;
+}
+
+.scan-result.success {
+  background-color: #f0f9e6;
+  color: #46b450;
+  border: 1px solid #7ad03a;
+}
+
+.scan-result.error {
+  background-color: #fbeaea;
+  color: #dc3232;
+  border: 1px solid #dc3232;
+}
+
+.scanned-items-wrap {
+  margin-top: 30px;
+}
+
+.scanned-items-filter {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 15px;
+}
+
+.scanned-items-filter input[type='text'] {
+  width: 70%;
+}
+
+.scanned-items-filter select {
+  width: 28%;
+}
+
+.scanned-items-table {
+  width: 100%;
+  margin-top: 15px;
+}
+
+.scanned-items-table .column-text {
+  width: 40%;
+}
+
+.scanned-items-table .column-location {
+  width: 30%;
+}
+
+.scanned-items-table .column-type {
+  width: 15%;
+}
+
+.scanned-items-table .column-actions {
+  width: 15%;
+  text-align: right;
+}
+
+.scanned-text-display {
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.scanned-text-edit {
+  margin-top: 10px;
+}
+
+.scanned-text-input {
+  width: 100%;
+  margin-bottom: 10px;
+}
+
+.scanned-text-actions {
+  text-align: right;
+}
+
+.no-items-message {
+  padding: 20px;
+  background: #f8f8f8;
+  border: 1px solid #ddd;
+  text-align: center;
+  color: #777;
+}
+
+/* Settings actions */
+.settings-actions {
+  margin-bottom: 20px;
+  padding: 15px;
+  background: #f8f8f8;
+  border: 1px solid #e5e5e5;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+}
+
+.settings-actions-info {
+  margin-left: 15px;
+  color: #555;
+  font-style: italic;
+}
+
+/* Ensure scanned text items get the same styling */
+.scanned-text {
+  min-height: 100px;
+}

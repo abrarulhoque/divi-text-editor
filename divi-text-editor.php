@@ -22,6 +22,7 @@ define('DIVI_TEXT_EDITOR_PLUGIN_URL', plugin_dir_url(__FILE__));
 
 // Include required files
 require_once DIVI_TEXT_EDITOR_PLUGIN_DIR . 'includes/shortcodes.php';
+require_once DIVI_TEXT_EDITOR_PLUGIN_DIR . 'includes/scanner.php';
 
 /**
  * Class DiviTextEditor
@@ -129,6 +130,11 @@ class DiviTextEditor {
     ];
     
     /**
+     * Scanner instance
+     */
+    private $scanner = null;
+    
+    /**
      * Main DiviTextEditor Instance
      * Ensures only one instance of DiviTextEditor is loaded
      */
@@ -148,6 +154,9 @@ class DiviTextEditor {
         
         // Load text variables from database
         $this->load_text_variables();
+        
+        // Initialize scanner
+        $this->scanner = new DiviTextEditorScanner();
         
         // Add admin menu
         add_action('admin_menu', array($this, 'add_admin_menu'));
@@ -173,6 +182,10 @@ class DiviTextEditor {
         
         // Text Mapping functionality
         add_action('wp_ajax_divi_text_editor_map_text', array($this, 'map_text_ajax'));
+        
+        // Scanner functionality
+        add_action('wp_ajax_divi_text_editor_scan', array($this, 'scan_ajax'));
+        add_action('wp_ajax_divi_text_editor_update_scanned_text', array($this, 'update_scanned_text_ajax'));
         
         // Enqueue admin scripts and styles
         add_action('admin_enqueue_scripts', array($this, 'enqueue_admin_assets'));
@@ -247,20 +260,34 @@ class DiviTextEditor {
             echo '<div class="notice notice-success is-dismissible"><p>' . __('Settings imported successfully!', 'divi-text-editor') . '</p></div>';
         }
         
+        // Check if scan is being triggered
+        if (isset($_GET['scan']) && $_GET['scan'] === 'start') {
+            // Run the scanner
+            $items = $this->scanner->scan_all_content();
+            
+            // Save scanned items
+            $count = $this->scanner->save_scanned_items();
+            
+            // Show success message
+            echo '<div class="notice notice-success is-dismissible"><p>' . sprintf(__('%d text items found and saved.', 'divi-text-editor'), $count) . '</p></div>';
+        }
+        
         // Save settings if form submitted
         if (isset($_POST['divi_text_editor_submit'])) {
             // Check nonce
             if (!isset($_POST['divi_text_editor_nonce']) || !wp_verify_nonce($_POST['divi_text_editor_nonce'], 'divi_text_editor_save')) {
                 echo '<div class="notice notice-error is-dismissible"><p>' . __('Security check failed. Please try again.', 'divi-text-editor') . '</p></div>';
             } else {
-                foreach ($this->text_variables as $key => $value) {
-                    if (isset($_POST['divi_text_editor_' . $key])) {
-                        update_option('divi_text_editor_' . $key, wp_kses_post($_POST['divi_text_editor_' . $key]));
+                // Process scanned items
+                $scanned_items = $this->scanner->get_saved_items();
+                foreach ($scanned_items as $key => $item) {
+                    if (isset($_POST['scanned_item_' . $key])) {
+                        $new_text = wp_kses_post($_POST['scanned_item_' . $key]);
+                        if ($new_text !== $item['text']) {
+                            $this->scanner->update_scanned_item($key, $new_text);
+                        }
                     }
                 }
-                
-                // Reload variables after save
-                $this->load_text_variables();
                 
                 // Show success message
                 echo '<div class="notice notice-success is-dismissible"><p>' . __('Settings saved successfully!', 'divi-text-editor') . '</p></div>';
@@ -275,78 +302,128 @@ class DiviTextEditor {
             
             <div class="nav-tab-wrapper">
                 <a href="#settings" class="nav-tab nav-tab-active"><?php _e('Text Settings', 'divi-text-editor'); ?></a>
-                <a href="#mapping" class="nav-tab"><?php _e('Text Mapping', 'divi-text-editor'); ?></a>
                 <a href="#import-export" class="nav-tab"><?php _e('Import/Export', 'divi-text-editor'); ?></a>
                 <a href="#help" class="nav-tab"><?php _e('Help', 'divi-text-editor'); ?></a>
             </div>
             
             <div id="settings" class="tab-content active">
+                <div class="settings-actions">
+                    <a href="<?php echo add_query_arg('scan', 'start'); ?>" class="button button-primary"><?php _e('Scan Website for Text', 'divi-text-editor'); ?></a>
+                    <span class="settings-actions-info"><?php _e('Click this button to scan your website for all text content. This will find and make editable all text in Divi modules.', 'divi-text-editor'); ?></span>
+                </div>
+                
                 <form method="post" action="">
                     <?php wp_nonce_field('divi_text_editor_save', 'divi_text_editor_nonce'); ?>
                     <table class="form-table">
-                        <?php foreach ($this->text_variables as $key => $value) : ?>
+                        <?php
+                        // Get scanned items
+                        $scanned_items = $this->scanner->get_saved_items();
+                        
+                        // Display scanned items if any
+                        if (!empty($scanned_items)) :
+                            $displayed_items = array();
+                            
+                            foreach ($scanned_items as $key => $item) :
+                                // Get the text content and strip HTML tags
+                                $text_content = wp_strip_all_tags($item['text']);
+                                
+                                // Skip if text is empty after stripping tags
+                                if (empty(trim($text_content))) {
+                                    continue;
+                                }
+                                
+                                // Skip if we've already displayed an identical text
+                                if (in_array(md5($text_content), $displayed_items)) {
+                                    continue;
+                                }
+                                
+                                // Add to displayed items tracking
+                                $displayed_items[] = md5($text_content);
+                                
+                                // Get post type and title for location info
+                                $location = '';
+                                if (isset($item['post_title']) && isset($item['post_type'])) {
+                                    $post_type_obj = get_post_type_object($item['post_type']);
+                                    $post_type_label = $post_type_obj ? $post_type_obj->labels->singular_name : $item['post_type'];
+                                    $location = sprintf(
+                                        '%s: %s',
+                                        esc_html($post_type_label),
+                                        esc_html($item['post_title'])
+                                    );
+                                }
+                                
+                                // Get a user-friendly label for the module type
+                                $module_type = isset($item['type']) ? $item['type'] : 'unknown';
+                                $module_type_label = '';
+                                
+                                switch ($module_type) {
+                                    case 'text':
+                                        $module_type_label = __('Text Module', 'divi-text-editor');
+                                        break;
+                                    case 'blurb_title':
+                                        $module_type_label = __('Blurb Title', 'divi-text-editor');
+                                        break;
+                                    case 'button_text':
+                                        $module_type_label = __('Button Text', 'divi-text-editor');
+                                        break;
+                                    case 'header_title':
+                                        $module_type_label = __('Header Title', 'divi-text-editor');
+                                        break;
+                                    case 'header_content':
+                                        $module_type_label = __('Header Content', 'divi-text-editor');
+                                        break;
+                                    case 'cta_title':
+                                        $module_type_label = __('CTA Title', 'divi-text-editor');
+                                        break;
+                                    case 'cta_content':
+                                        $module_type_label = __('CTA Content', 'divi-text-editor');
+                                        break;
+                                    case 'testimonial_author':
+                                        $module_type_label = __('Testimonial Author', 'divi-text-editor');
+                                        break;
+                                    case 'testimonial_content':
+                                        $module_type_label = __('Testimonial Content', 'divi-text-editor');
+                                        break;
+                                    default:
+                                        $module_type_label = __('Unknown', 'divi-text-editor');
+                                }
+                                
+                                // Combine location and type for the label
+                                $label = $location . ' - ' . $module_type_label;
+                            ?>
                             <tr valign="top">
                                 <th scope="row">
-                                    <label for="divi_text_editor_<?php echo esc_attr($key); ?>">
-                                        {{<?php echo esc_html($key); ?>}}
+                                    <label for="scanned_item_<?php echo esc_attr($key); ?>">
+                                        <?php echo esc_html($label); ?>
                                     </label>
                                 </th>
                                 <td>
                                     <textarea 
-                                        name="divi_text_editor_<?php echo esc_attr($key); ?>" 
-                                        id="divi_text_editor_<?php echo esc_attr($key); ?>" 
-                                        class="large-text" 
+                                        name="scanned_item_<?php echo esc_attr($key); ?>" 
+                                        id="scanned_item_<?php echo esc_attr($key); ?>" 
+                                        class="large-text scanned-text" 
                                         rows="4"
-                                    ><?php echo esc_textarea($value); ?></textarea>
+                                        data-key="<?php echo esc_attr($key); ?>"
+                                        data-original="<?php echo esc_attr($item['text']); ?>"
+                                    ><?php echo esc_textarea($text_content); ?></textarea>
                                 </td>
                             </tr>
-                        <?php endforeach; ?>
+                            <?php endforeach; ?>
+                        <?php else: ?>
+                            <tr>
+                                <td colspan="2">
+                                    <div class="notice notice-info inline">
+                                        <p><?php _e('No text content found. Click "Scan Website for Text" to find and make editable all text in your Divi modules.', 'divi-text-editor'); ?></p>
+                                    </div>
+                                </td>
+                            </tr>
+                        <?php endif; ?>
                     </table>
                     
                     <p class="submit">
                         <input type="submit" name="divi_text_editor_submit" class="button-primary" value="<?php _e('Save Changes', 'divi-text-editor'); ?>" />
                     </p>
                 </form>
-            </div>
-            
-            <div id="mapping" class="tab-content">
-                <h2><?php _e('Text Mapping Tool', 'divi-text-editor'); ?></h2>
-                <p><?php _e('Use this tool to map text from your website directly to variables. Simply paste the text you want to map and select the variable to assign it to.', 'divi-text-editor'); ?></p>
-                
-                <div class="text-mapping-tool">
-                    <div class="text-mapping-input">
-                        <label for="text_to_map"><?php _e('Text to Map:', 'divi-text-editor'); ?></label>
-                        <textarea id="text_to_map" class="large-text" rows="6" placeholder="<?php _e('Paste the text from your website here...', 'divi-text-editor'); ?>"></textarea>
-                    </div>
-                    
-                    <div class="text-mapping-variable">
-                        <label for="variable_to_map"><?php _e('Map to Variable:', 'divi-text-editor'); ?></label>
-                        <select id="variable_to_map" class="regular-text">
-                            <option value=""><?php _e('-- Select Variable --', 'divi-text-editor'); ?></option>
-                            <?php foreach ($this->text_variables as $key => $value) : ?>
-                                <option value="<?php echo esc_attr($key); ?>"><?php echo esc_html($key); ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-                    
-                    <div class="text-mapping-actions">
-                        <button id="map_text_button" class="button button-primary"><?php _e('Map Text to Variable', 'divi-text-editor'); ?></button>
-                        <span class="spinner"></span>
-                        <div id="mapping_result" class="mapping-result"></div>
-                    </div>
-                </div>
-                
-                <div class="text-mapping-help">
-                    <h3><?php _e('How to use the Text Mapping Tool', 'divi-text-editor'); ?></h3>
-                    <ol>
-                        <li><?php _e('Find the text on your website that you want to replace with a variable', 'divi-text-editor'); ?></li>
-                        <li><?php _e('Copy the exact text and paste it in the "Text to Map" field above', 'divi-text-editor'); ?></li>
-                        <li><?php _e('Select the variable you want to associate with this text', 'divi-text-editor'); ?></li>
-                        <li><?php _e('Click "Map Text to Variable" button', 'divi-text-editor'); ?></li>
-                        <li><?php _e('The text will now be mapped to the selected variable', 'divi-text-editor'); ?></li>
-                        <li><?php _e('You can then edit the variable\'s content on the "Text Settings" tab', 'divi-text-editor'); ?></li>
-                    </ol>
-                </div>
             </div>
             
             <div id="import-export" class="tab-content">
@@ -377,33 +454,24 @@ class DiviTextEditor {
             <div id="help" class="tab-content">
                 <div class="divi-text-editor-help">
                     <h2><?php _e('How to use', 'divi-text-editor'); ?></h2>
-                    <p><?php _e('There are two ways to use the text variables in your Divi content:', 'divi-text-editor'); ?></p>
+                    <p><?php _e('Using the Divi Text Editor is easy:', 'divi-text-editor'); ?></p>
                     
-                    <h3><?php _e('Method 1: Variable Placeholders', 'divi-text-editor'); ?></h3>
-                    <p><?php _e('Use these variables in your Divi content by adding them in double curly braces. For example:', 'divi-text-editor'); ?></p>
-                    <ul>
-                        <li><code>{{home_title1}}</code> - <?php _e('Will be replaced with your home title content', 'divi-text-editor'); ?></li>
-                        <li><code>{{home_subtitle1}}</code> - <?php _e('Will be replaced with your home subtitle content', 'divi-text-editor'); ?></li>
-                    </ul>
-                    
-                    <h3><?php _e('Method 2: Shortcodes', 'divi-text-editor'); ?></h3>
-                    <p><?php _e('You can also use shortcodes to display the text variables:', 'divi-text-editor'); ?></p>
-                    <ul>
-                        <li><code>[divi_text key="home_title1"]</code> - <?php _e('Will display the home title content', 'divi-text-editor'); ?></li>
-                        <li><code>[divi_text key="home_subtitle1" default="Fallback text"]</code> - <?php _e('Will display the home subtitle content, or the default text if no value is set', 'divi-text-editor'); ?></li>
-                    </ul>
-                    
-                    <h3><?php _e('Adding variables to Divi', 'divi-text-editor'); ?></h3>
-                    <p><?php _e('To add these variables to your Divi content:', 'divi-text-editor'); ?></p>
+                    <h3><?php _e('Editing Text Content', 'divi-text-editor'); ?></h3>
                     <ol>
-                        <li><?php _e('Edit your page with Divi Builder', 'divi-text-editor'); ?></li>
-                        <li><?php _e('Add or edit a text module', 'divi-text-editor'); ?></li>
-                        <li><?php _e('Insert the variable using double curly braces, like {{home_title1}} or use the shortcode [divi_text key="home_title1"]', 'divi-text-editor'); ?></li>
-                        <li><?php _e('Save your changes', 'divi-text-editor'); ?></li>
+                        <li><?php _e('Go to the "Text Settings" tab', 'divi-text-editor'); ?></li>
+                        <li><?php _e('Click the "Scan Website for Text" button to find all static text in your website', 'divi-text-editor'); ?></li>
+                        <li><?php _e('Edit any text directly in the textareas', 'divi-text-editor'); ?></li>
+                        <li><?php _e('Click "Save Changes" to update your website text', 'divi-text-editor'); ?></li>
                     </ol>
+                    <p><?php _e('You can use all the Excel-like features (multi-select, copy/paste multiple texts) with the text fields.', 'divi-text-editor'); ?></p>
                     
-                    <h3><?php _e('Editing variables', 'divi-text-editor'); ?></h3>
-                    <p><?php _e('Simply edit the values in the Text Settings tab and save changes. Your website will immediately update with the new content.', 'divi-text-editor'); ?></p>
+                    <h3><?php _e('Excel-like Functionality', 'divi-text-editor'); ?></h3>
+                    <ul>
+                        <li><?php _e('Multi-select: Hold Ctrl/Cmd and click on textareas to select multiple fields', 'divi-text-editor'); ?></li>
+                        <li><?php _e('Drag selection: Click and drag from the small blue square in the bottom-right corner of a textarea to select multiple fields', 'divi-text-editor'); ?></li>
+                        <li><?php _e('Multi-copy: Select multiple fields and press Ctrl/Cmd+C to copy their content', 'divi-text-editor'); ?></li>
+                        <li><?php _e('Multi-paste: Copy multiple lines of text and paste into a textarea to fill consecutive fields', 'divi-text-editor'); ?></li>
+                    </ul>
                 </div>
             </div>
         </div>
@@ -498,13 +566,17 @@ class DiviTextEditor {
             wp_die(__('Security check failed. Please try again.', 'divi-text-editor'));
         }
         
-        // Load current settings
-        $this->load_text_variables();
+        // Get scanned items
+        $scanned_items = $this->scanner->get_saved_items();
         
         // Prepare the data
         $data = array();
-        foreach ($this->text_variables as $key => $value) {
-            $data[$key] = $value;
+        
+        // Add scanned items to export data
+        if (!empty($scanned_items)) {
+            foreach ($scanned_items as $key => $item) {
+                $data[$key] = $item;
+            }
         }
         
         // Set headers for JSON download
@@ -596,6 +668,66 @@ class DiviTextEditor {
             'variable' => $variable,
             'text' => $text
         ));
+        
+        wp_die();
+    }
+    
+    /**
+     * Run the text scanner via AJAX
+     */
+    public function scan_ajax() {
+        // Check nonce
+        if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'divi_text_editor_mapping_nonce')) {
+            wp_send_json_error(array('message' => __('Security check failed.', 'divi-text-editor')));
+            wp_die();
+        }
+        
+        // Run scanner
+        $items = $this->scanner->scan_all_content();
+        
+        // Save scanned items
+        $count = $this->scanner->save_scanned_items();
+        
+        // Return success
+        wp_send_json_success(array(
+            'message' => sprintf(__('%d text items found and saved.', 'divi-text-editor'), $count),
+            'count' => $count
+        ));
+        
+        wp_die();
+    }
+    
+    /**
+     * Update scanned text via AJAX
+     */
+    public function update_scanned_text_ajax() {
+        // Check nonce
+        if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'divi_text_editor_mapping_nonce')) {
+            wp_send_json_error(array('message' => __('Security check failed.', 'divi-text-editor')));
+            wp_die();
+        }
+        
+        // Check for required data
+        if (!isset($_POST['key']) || !isset($_POST['text'])) {
+            wp_send_json_error(array('message' => __('Missing required data.', 'divi-text-editor')));
+            wp_die();
+        }
+        
+        $key = sanitize_text_field($_POST['key']);
+        $text = wp_kses_post($_POST['text']);
+        
+        // Update the text
+        $success = $this->scanner->update_scanned_item($key, $text);
+        
+        if ($success) {
+            wp_send_json_success(array(
+                'message' => __('Text updated successfully.', 'divi-text-editor'),
+                'key' => $key,
+                'text' => $text
+            ));
+        } else {
+            wp_send_json_error(array('message' => __('Failed to update text. The text may not exist or could not be found in the post content.', 'divi-text-editor')));
+        }
         
         wp_die();
     }

@@ -59,6 +59,9 @@
       // Initialize drag selection functionality
       initDragSelection()
 
+      // Initialize form submission handler
+      initFormSubmission()
+
       // Mark as initialized
       isInitialized = true
       debug('Initialization complete')
@@ -73,6 +76,37 @@
           .first()
       }
     }
+  }
+
+  /**
+   * Initialize form submission handler to preserve HTML tags
+   */
+  function initFormSubmission () {
+    debug('Initializing form submission handler')
+
+    // Handle form submission
+    $('#settings form').on('submit', function () {
+      // For each textarea with data-original attribute
+      $('textarea[data-original]').each(function () {
+        var $textarea = $(this)
+        var originalHtml = $textarea.data('original')
+        var newText = $textarea.val()
+
+        // If the text has HTML tags, we need to preserve them
+        if (originalHtml && originalHtml.indexOf('<') !== -1) {
+          // Store the new text in a hidden input to be used by the server
+          var $hidden = $('<input>').attr({
+            type: 'hidden',
+            name: $textarea.attr('name') + '_original',
+            value: originalHtml
+          })
+
+          $textarea.after($hidden)
+        }
+      })
+
+      return true // Continue with form submission
+    })
   }
 
   // Use multiple initialization approaches for reliability
