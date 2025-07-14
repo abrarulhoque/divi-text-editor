@@ -116,65 +116,40 @@ class DiviTextEditorScanner {
             return;
         }
         
-        // ------------------------------------------------------------------
-        // NEW LOGIC: collect matches together with their offset so we can sort
-        // them in the exact order they appear inside the post content. This
-        // prevents the list from being grouped by module type (previous
-        // behaviour) and instead follows the top-to-bottom visual flow that
-        // the editor expects (see CLAUDE.md requirement #2).
-        // ------------------------------------------------------------------
-        $post_items = [];
-        
+        // Scan each module type
         foreach ($this->shortcode_patterns as $type => $pattern) {
-            if (preg_match_all($pattern, $post->post_content, $matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
+            if (preg_match_all($pattern, $post->post_content, $matches, PREG_SET_ORDER)) {
                 foreach ($matches as $match) {
-                    // For every defined pattern the content we want lives in
-                    // capture group 1. With PREG_OFFSET_CAPTURE each element is
-                    // an array: [ value, offset ].
-                    $text   = isset($match[1][0]) ? $match[1][0] : '';
-                    $offset = isset($match[1][1]) ? $match[1][1] : 0;
-
-                    // Skip empty strings
+                    // The content is in capture group 1
+                    $text = $match[1];
+                    
+                    // Skip if the text is empty
                     if (empty(trim($text))) {
                         continue;
                     }
                     
-                    // Skip dynamic content
+                    // Skip if contains dynamic content
                     if ($this->contains_dynamic_content($text)) {
                         continue;
                     }
                     
-                    // Decode entities but keep HTML tags – preserves frontend
-                    // formatting when the string contains inline markup.
-                    $text_decoded = html_entity_decode($text);
+                    // Clean up HTML entities
+                    $text = html_entity_decode($text);
                     
-                    // Build the item array exactly as before
-                    $key   = $this->generate_key($text_decoded, $type, $post->ID);
-                    $item  = [
-                        'text'       => $text_decoded,
-                        'type'       => $type,
-                        'post_id'    => $post->ID,
+                    // Generate a unique key for this text
+                    $key = $this->generate_key($text, $type, $post->ID);
+                    
+                    // Add to scanned items
+                    $this->scanned_items[$key] = [
+                        'text' => $text,
+                        'type' => $type,
+                        'post_id' => $post->ID,
                         'post_title' => $post->post_title,
-                        'post_type'  => $post->post_type,
-                        'key'        => $key,
-                        'offset'     => $offset
+                        'post_type' => $post->post_type,
+                        'key' => $key
                     ];
-
-                    $post_items[] = $item;
                 }
             }
-        }
-        
-        // Sort all found items for this post by their offset in ascending order
-        // (i.e. first text that appears in the markup comes first).
-        usort($post_items, function ($a, $b) {
-            return $a['offset'] <=> $b['offset'];
-        });
-        
-        // Merge the ordered items into the main scanned list while preserving
-        // the order of insertion (PHP arrays keep insertion order).
-        foreach ($post_items as $item) {
-            $this->scanned_items[$item['key']] = $item;
         }
     }
     
