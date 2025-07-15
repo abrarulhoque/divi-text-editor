@@ -119,7 +119,10 @@ class DiviTextEditorScanner {
         
         // Sort by position to ensure proper order
         usort($this->scanned_items, function($a, $b) {
-            return $a['position'] - $b['position'];
+            if ($a['post_id'] === $b['post_id']) {
+                return $a['position'] - $b['position'];
+            }
+            return $a['post_id'] - $b['post_id'];
         });
         
         // Convert to keyed array for compatibility
@@ -137,6 +140,8 @@ class DiviTextEditorScanner {
      * @param int $post_id Post ID to scan
      */
     private function scan_post_hierarchical($post_id) {
+        // Reset position counter so each page starts from 0
+        $this->position_counter = 0;
         $post = get_post($post_id);
         if (!$post || empty($post->post_content)) {
             return;
@@ -155,10 +160,11 @@ class DiviTextEditorScanner {
      * Parse content hierarchically (sections -> rows -> columns -> modules)
      */
     private function parse_content_hierarchical($content, $post_id, $post_type, $post_title) {
-        // Parse sections
-        $section_pattern = '/\[et_pb_section([^\]]*)\](.*?)\[\/et_pb_section\]/s';
+        // Match both regular and full-width sections
+        $section_pattern = '/\[(et_pb_section|et_pb_fullwidth_section)([^\]]*)\](.*?)\[\/\1\]/s';
         preg_replace_callback($section_pattern, function($matches) use ($post_id, $post_type, $post_title) {
-            $section_content = $matches[2];
+            // $matches[3] now contains the inner content because we added a new capture group for the tag name
+            $section_content = $matches[3];
             
             // Parse rows within section
             $row_pattern = '/\[et_pb_row([^\]]*)\](.*?)\[\/et_pb_row\]/s';
@@ -175,9 +181,15 @@ class DiviTextEditorScanner {
                     
                     return $matches[0];
                 }, $row_content);
+
+                // ALSO process any modules placed directly in the row (outside columns)
+                $this->parse_modules($row_content, $post_id, $post_type, $post_title);
                 
                 return $matches[0];
             }, $section_content);
+
+            // ALSO process any modules placed directly in the section (outside rows)
+            $this->parse_modules($section_content, $post_id, $post_type, $post_title);
             
             return $matches[0];
         }, $content);
@@ -187,8 +199,8 @@ class DiviTextEditorScanner {
      * Parse modules and extract text
      */
     private function parse_modules($content, $post_id, $post_type, $post_title) {
-        // Pattern for modules with content
-        $module_pattern = '/\[([a-z_]+)([^\]]*?)\](?:(.*?)\[\/\1\])?/s';
+        // Allow underscores, hyphens and digits in shortcode names
+        $module_pattern = '/\[([a-z0-9_\-]+)([^\]]*?)\](?:(.*?)\[\/\1\])?/is';
         
         preg_replace_callback($module_pattern, function($matches) use ($post_id, $post_type, $post_title) {
             $module_type = $matches[1];
@@ -405,9 +417,13 @@ class DiviTextEditorScanner {
         // Sort by position if available
         if (!empty($items)) {
             uasort($items, function($a, $b) {
-                $pos_a = isset($a['position']) ? $a['position'] : 999999;
-                $pos_b = isset($b['position']) ? $b['position'] : 999999;
-                return $pos_a - $pos_b;
+                $post_diff = ($a['post_id'] ?? 0) - ($b['post_id'] ?? 0);
+                if ($post_diff === 0) {
+                    $pos_a = isset($a['position']) ? $a['position'] : 999999;
+                    $pos_b = isset($b['position']) ? $b['position'] : 999999;
+                    return $pos_a - $pos_b;
+                }
+                return $post_diff;
             });
         }
         
@@ -457,8 +473,26 @@ class DiviTextEditorScanner {
             $pattern = '/(\[' . preg_quote($module_type) . '[^\]]*\])' . $escaped_original . '(\[\/' . preg_quote($module_type) . '\])/s';
             $replacement = '$1' . $new_text . '$2';
         } else {
-            // Attribute value
-            $attr_name = str_replace(['_text', 'expanding_', 'hover_'], ['', 'content_', 'content_hover_'], $field_type);
+            // Attribute value – provide explicit mapping for tricky cases
+            $attr_mappings = [
+                'blurb_title'          => 'title',
+                'cta_button'           => 'button_text',
+                'cta_title'            => 'title',
+                'testimonial_author'   => 'author',
+                'typing_text'          => 'typing_text',
+                'expanding_title'      => 'content_title',
+                'expanding_description'=> 'content_description',
+                'expanding_button'     => 'content_button_text',
+                'hover_title'          => 'content_hover_title',
+                'hover_content'        => 'content_hover_content',
+                'hover_button'         => 'content_hover_button_text',
+            ];
+
+            if (isset($attr_mappings[$field_type])) {
+                $attr_name = $attr_mappings[$field_type];
+            } else {
+                $attr_name = str_replace(['_text', 'expanding_', 'hover_'], ['', 'content_', 'content_hover_'], $field_type);
+            }
             $pattern = '/(\[' . preg_quote($module_type) . '[^\]]*' . $attr_name . '=")' . $escaped_original . '("[^\]]*\])/';
             $replacement = '$1' . esc_attr($new_text) . '$2';
         }
