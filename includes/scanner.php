@@ -166,7 +166,10 @@ class DiviTextEditorScanner {
             // $matches[3] now contains the inner content because we added a new capture group for the tag name
             $section_content = $matches[3];
             
-            // Parse rows within section
+            // First, capture any modules that are placed directly in the section BEFORE rows (e.g. full-width header)
+            $this->parse_modules($section_content, $post_id, $post_type, $post_title);
+
+            // Now parse rows within section (these come later in the shortcode string)
             $row_pattern = '/\[et_pb_row([^\]]*)\](.*?)\[\/et_pb_row\]/s';
             preg_replace_callback($row_pattern, function($matches) use ($post_id, $post_type, $post_title) {
                 $row_content = $matches[2];
@@ -187,9 +190,6 @@ class DiviTextEditorScanner {
                 
                 return $matches[0];
             }, $section_content);
-
-            // ALSO process any modules placed directly in the section (outside rows)
-            $this->parse_modules($section_content, $post_id, $post_type, $post_title);
             
             return $matches[0];
         }, $content);
@@ -247,11 +247,11 @@ class DiviTextEditorScanner {
                 break;
                 
             case 'et_pb_fullwidth_header':
-                if (!empty($attributes['title']) && !$this->contains_dynamic_content($attributes['title'])) {
-                    $this->add_text_item($attributes['title'], 'header_title', $module_type, $post_id, $post_type, $post_title);
-                }
                 if (!empty($attributes['subhead']) && !$this->contains_dynamic_content($attributes['subhead'])) {
                     $this->add_text_item($attributes['subhead'], 'header_subhead', $module_type, $post_id, $post_type, $post_title);
+                }
+                if (!empty($attributes['title']) && !$this->contains_dynamic_content($attributes['title'])) {
+                    $this->add_text_item($attributes['title'], 'header_title', $module_type, $post_id, $post_type, $post_title);
                 }
                 if (!empty($content) && !$this->contains_dynamic_content($content)) {
                     $this->add_text_item($content, 'header_content', $module_type, $post_id, $post_type, $post_title);
